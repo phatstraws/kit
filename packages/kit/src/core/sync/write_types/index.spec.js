@@ -5,7 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { afterEach, assert, beforeEach, describe, expect, test } from 'vitest';
 import create_manifest_data from '../create_manifest_data/index.js';
-import { tweak_types, write_all_types } from './index.js';
+import { tweak_types, write_all_types, write_types } from './index.js';
 import { write_app_types } from '../write_app_types.js';
 import { validate_config } from '../../config/index.js';
 import { write_env } from '../write_env.js';
@@ -371,6 +371,44 @@ describe('Cleans up unused files', () => {
 		assert.ok(!fs.existsSync(path.join(about_dir, 'team')));
 		assert.ok(fs.existsSync(path.join(about_dir, '$types.d.ts')));
 	});
+});
+
+test('updates ancestor layout types when a page edit removes its load', () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-write-types-'));
+	const routes = path.join(root, 'src/routes');
+	const page = path.join(routes, 'dashboard/+page.ts');
+
+	fs.mkdirSync(path.dirname(page), { recursive: true });
+	fs.writeFileSync(path.join(routes, '+layout.server.ts'), 'export const load = () => ({});');
+	fs.writeFileSync(path.join(routes, 'dashboard/+page.svelte'), '');
+	fs.writeFileSync(page, "export const load = () => ({ title: 'Dashboard' });");
+
+	try {
+		const config = validate_config({});
+		config.files.assets = path.join(root, 'static');
+		config.files.params = path.join(root, 'src/params');
+		config.files.routes = routes;
+		config.outDir = path.join(root, '.svelte-kit');
+
+		const manifest = create_manifest_data(config, root);
+		write_all_types(config, manifest, root);
+
+		const layout_types = path.join(config.outDir, 'types/src/routes/$types.d.ts');
+		const layout_server_load = (/** @type {string} */ shape) =>
+			`export type LayoutServerLoad<OutputData extends ${shape} = ${shape}>`;
+		expect(fs.readFileSync(layout_types, 'utf-8')).toContain(
+			layout_server_load('Partial<App.PageData> & Record<string, any> & NotThenable | void')
+		);
+
+		fs.writeFileSync(page, 'export {};');
+		write_types(config, manifest, page, root);
+
+		expect(fs.readFileSync(layout_types, 'utf-8')).toContain(
+			layout_server_load('OutputDataShape<LayoutServerParentData>')
+		);
+	} finally {
+		fs.rmSync(root, { force: true, recursive: true });
+	}
 });
 
 test('prunes stale entries from route_meta_data.json when routes are deleted', () => {

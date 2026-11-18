@@ -186,7 +186,18 @@ export function write_types(config, manifest_data, file, root) {
 	if (!route) return;
 	if (!route.leaf && !route.layout && !route.endpoint) return; // nothing to do
 
-	update_types(config, create_routes_map(manifest_data), route, root);
+	const routes_map = create_routes_map(manifest_data);
+	update_types(config, routes_map, route, root);
+
+	const leaf = route.leaf;
+	const project_relative = posixify(path.relative(root, file));
+	if (!leaf || (leaf.universal !== project_relative && leaf.server !== project_relative)) return;
+
+	for (const layout_route of manifest_data.routes) {
+		if (layout_route !== route && layout_route.layout?.child_pages?.includes(leaf)) {
+			update_types(config, routes_map, layout_route, root);
+		}
+	}
 }
 
 /**
